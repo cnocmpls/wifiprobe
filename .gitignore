@@ -1,1 +1,21 @@
-/.venv/
+# Ignore node_modules
+node_modules/
+venv/
+
+# Ignore Python bytecode files
+__pycache__/
+*.pyc
+
+# Ignore environment files
+.env
+
+# Ignore log files
+*.log
+
+# Ignore IDE-specific files
+.vscode/
+.idea/
+
+# Ignore build files
+dist/
+build/
