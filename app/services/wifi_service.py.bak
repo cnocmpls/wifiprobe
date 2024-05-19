@@ -1,0 +1,185 @@
+# app/services/wifi_service.py
+import pywifi
+from pywifi import PyWiFi, const, Profile
+from typing import List
+import time
+
+from app.schemas.network import Network
+from app.schemas.network_interface import NetworkInterface
+from app.services.logger import setup_logger
+
+# Configure logger
+logger = setup_logger(__name__)
+
+def get_wifi_interfaces() -> List[NetworkInterface]:
+    try:
+        wifi = PyWiFi()
+        if not wifi.interfaces():
+            logger.error("No Wi-Fi interfaces found.")
+            raise ValueError("No Wi-Fi interfaces available")
+
+        interfaces = wifi.interfaces()
+        logger.info(f"Found {len(interfaces)} Wi-Fi interfaces.")
+        return [NetworkInterface(index=i, name=iface.name(), description=iface.name()) for i, iface in enumerate(interfaces)]
+    except Exception as e:
+        logger.error("Failed to fetch Wi-Fi interfaces", exc_info=True)
+        raise e
+
+
+def scan_wifi_networks(interface_index: int = 0):
+    wifi = PyWiFi()
+    if interface_index >= len(wifi.interfaces()):
+        logger.error("Interface index out of range")
+        return []
+
+    iface = wifi.interfaces()[interface_index]
+    iface.scan()
+    time.sleep(5)  # Sleep to allow for scan to complete
+    results = iface.scan_results()
+
+    networks = []
+    for net in results:
+        try:
+            # Assuming bss_type, freq, akm, and auth are correctly accessible here.
+            network_data = {
+                "ssid": net.ssid,
+                "bssid": net.bssid,
+                "signal": net.signal,
+                "frequency": getattr(net, 'frequency', 0),  # Placeholder, adjust as per actual attribute availability
+                "security": convert_security_type(net.akm[-1] if net.akm else const.AKM_TYPE_NONE),
+                "auth_algorithm": convert_auth_algorithm(net.auth if hasattr(net, 'auth') else const.AUTH_ALG_OPEN),
+                "network_type": convert_network_type(getattr(net, 'bss_type', const.DOT11_BSS_TYPE_ANY))
+            }
+            networks.append(Network(**network_data))
+        except Exception as e:
+            logger.error(f"Error processing network data: {e}", exc_info=True)
+
+    logger.info(f"Scan completed on interface {iface.name()}. Found {len(networks)} networks.")
+    return networks
+
+def convert_network_type(bss_type):
+    return {
+        const.DOT11_BSS_TYPE_INFRA: "Infrastructure",
+        const.DOT11_BSS_TYPE_INDEPENDENT: "Adhoc",
+        const.DOT11_BSS_TYPE_ANY: "Any"
+    }.get(bss_type, "Unknown")
+
+def convert_security_type(akm_type):
+    return {
+        const.AKM_TYPE_NONE: 'None',
+        const.AKM_TYPE_WPA: 'WPA',
+        const.AKM_TYPE_WPAPSK: 'WPA-PSK',
+        const.AKM_TYPE_WPA2: 'WPA2',
+        const.AKM_TYPE_WPA2PSK: 'WPA2-PSK'
+    }.get(akm_type, 'Unknown')
+
+def convert_auth_algorithm(auth_alg):
+    return {
+        const.AUTH_ALG_OPEN: "Open",
+        const.AUTH_ALG_SHARED: "Shared"
+    }.get(auth_alg, "Unknown")
+
+
+
+
+#def scan_wifi_networks(interface_index: int = 0):
+#    wifi = PyWiFi()
+#    if interface_index >= len(wifi.interfaces()):
+#        logger.error("Interface index out of range")
+#        return []
+
+#    iface = wifi.interfaces()[interface_index]
+#    iface.scan()
+#    time.sleep(5)  # Sleep to allow for scan to complete
+#    results = iface.scan_results()
+
+#    networks = []
+#    for net in results:
+#        try:
+#            network_data = {
+#                "ssid": net.ssid,
+#                "bssid": net.bssid,
+#                "signal": net.signal,
+#                "frequency": net.freq,  # Assuming freq is directly available; convert if necessary
+#                "security": convert_security_type(net.akm[-1]),  # Assuming the last akm is the effective one
+#                "auth_algorithm": convert_auth_algorithm(net.auth),
+#                "network_type": convert_network_type(net.bss_type)
+#            }
+#            networks.append(Network(**network_data))
+#        except Exception as e:
+#            logger.error(f"Error processing network data: {e}", exc_info=True)
+
+#    logger.info(f"Scan completed on interface {iface.name()}. Found {len(networks)} networks.")
+#    return networks
+
+
+#def convert_network_type(bss_type):
+#    return {
+#        const.DOT11_BSS_TYPE_INFRA: "Infrastructure",
+#        const.DOT11_BSS_TYPE_INDEPENDENT: "Ad-hoc",
+#        const.DOT11_BSS_TYPE_ANY: "Any"
+#    }.get(bss_type, "Unknown")
+
+#def scan_wifi_networks(interface_index: int) -> List[Network]:
+#    try:
+#        wifi = PyWiFi()
+#        if len(wifi.interfaces()) > interface_index:
+#            iface = wifi.interfaces()[interface_index]
+#            logger.debug(f"Found wifi interface {iface}")
+#            logger.debug(f"Scanning interface {iface} for published SSIDs")
+#            iface.scan()
+#            results = iface.scan_results()
+#            logger.info(f"Scan completed on interface {iface.name()}. Found {len(results)} networks.")
+#            logger.debug(f"Scan Results: {results}")
+#            networks = []
+#            for net in results:
+#                try:
+#                    network_data = {
+#                        "ssid": net.ssid,
+#                        "bssid": net.bssid,
+#                        "signal": net.signal,
+#                        "security": net.akm[0] if net.akm else "Open"  # Example adjustment
+#                    }
+#                    networks.append(Network(**network_data))
+#                except Exception as e:
+#                    logger.error("Error processing network data", exc_info=True)
+#            logger.info(f"Scan completed on interface {iface.name()}. Found {len(networks)} networks.")
+#            return networks
+#        else:
+#            logger.warning(f"No interface found at index {interface_index}")
+#            return []
+#    except Exception as e:
+#        logger.error("Failed to scan Wi-Fi networks", exc_info=True)
+#        raise e
+
+
+
+#def scan_wifi_networks(interface_index=0) -> List[Network]:
+#    try:
+#        logger.debug("Starting Wi-Fi network scan.")
+#        wifi = PyWiFi()
+#        if not wifi.interfaces():
+#            logger.error("No Wi-Fi interfaces found.")
+#            raise ValueError("No Wi-Fi interfaces available")
+
+
+#        iface = wifi.interfaces()[interface_index]
+#        logger.debug(f"Found wifi interface {iface}")
+#        logger.debug(f"Scanning interface {iface} for published SSIDs")
+#        iface.scan()
+#        results = iface.scan_results()
+#        logger.debug(f"Scan Results: {results}")
+
+
+#        networks = [Network(
+#            SSID=network.ssid,
+#            BSSID=network.bssid,
+#            Signal=network.signal,
+#            Security=[const.AKM_TYPE_DICT.get(akm) for akm in network.akm]
+#        ) for network in results]
+
+#        logger.info(f"Found {len(networks)} networks.")
+#        return networks
+#    except Exception as e:
+#        logger.error("Failed to scan Wi-Fi networks", exc_info=True)
+#        raise RuntimeError("Wi-Fi scanning failed") from e
