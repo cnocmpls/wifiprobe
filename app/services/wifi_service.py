@@ -2,7 +2,8 @@
 import time
 from typing import List
 
-from pywifi import PyWiFi, const
+from pywifi import PyWiFi, const, Profile
+from fastapi import HTTPException
 
 from app.schemas.network import Network
 from app.services.logger import setup_logger
@@ -10,101 +11,6 @@ from app.services.logger import setup_logger
 # Configure logger
 logger = setup_logger(__name__)
 
-
-# def get_wifi_interfaces() -> List[NetworkInterface]:
-#     try:
-#         wifi = PyWiFi()
-#         if not wifi.interfaces():
-#             logger.error("No Wi-Fi interfaces found.")
-#             raise ValueError("No Wi-Fi interfaces available")
-#
-#         interfaces = wifi.interfaces()
-#         logger.info(f"Found {len(interfaces)} Wi-Fi interfaces.")
-#         logger.debug(f"Interfaces: {interfaces}")
-#
-#         interfaces = wifi.interfaces()
-#
-#         network_interfaces = []
-#         for iface in interfaces:
-#
-#                 network_interfaces.append(NetworkInterface(
-#                     name=iface.name(),
-#                     description=f"Interface GUID: {guid}",
-#                     mac_address=mac_address,
-#                     ip_address=ip_address,
-#                     index=iface.index(),
-#                     status='Unknown'  # Placeholder for status, replace as needed
-#                 ))
-#         return network_interfaces
-#     except Exception as e:
-#         logger.error("Failed to fetch Wi-Fi interfaces", exc_info=True)
-#         raise e
-#
-# # def get_wifi_interfaces() -> List[NetworkInterface]:
-# #     try:
-# #         wifi = PyWiFi()
-# #         if not wifi.interfaces():
-# #             logger.error("No Wi-Fi interfaces found.")
-# #             raise ValueError("No Wi-Fi interfaces available")
-# #
-# #         interfaces = wifi.interfaces()
-# #         logger.info(f"Found {len(interfaces)} Wi-Fi interfaces.")
-# #         return [NetworkInterface(index=i, name=iface.name(), description=iface.name()) for i, iface in enumerate(interfaces)]
-# #     except Exception as e:
-# #         logger.error("Failed to fetch Wi-Fi interfaces", exc_info=True)
-# #         raise e
-#
-# def get_wifi_interfaces() -> List[NetworkInterface]:
-#     try:
-#         wifi = PyWiFi()
-#
-#         netiface_interfaces = netifaces.interfaces()
-#         print(netiface_interfaces)
-#         if not netiface_interfaces:
-#             logger.error("No network interfaces found.")
-#             raise ValueError("No network interfaces available")
-#
-#
-#         interfaces = wifi.interfaces()
-#         if not interfaces:
-#             logger.error("No Wi-Fi interfaces found.")
-#             raise ValueError("No Wi-Fi interfaces available")
-#
-#         for interface in interfaces:
-#             print('Pywifi interface:', interface, interface.name(), interface.status())
-#             # print(interface.name(), interface.status())
-#         for iface in netiface_interfaces:
-#             print('Netifaces interface:', iface, netifaces.ifaddresses(iface), netifaces.AF_LINK, netifaces.ifaddresses(iface).get(netifaces.AF_LINK, [{}])[0].get('addr', 'Unknown'))
-#             # print(iface, netifaces.ifaddresses(iface), netifaces.AF_LINK, netifaces.ifaddresses(iface).get(netifaces.AF_LINK, [{}])[0].get('addr', 'Unknown'))
-#
-#
-#         logger.info(f"Found {len(interfaces)} Wi-Fi interfaces.")
-#         network_interfaces = []
-#         for index, iface in enumerate(interfaces):
-#             status = iface.status()
-#             status_description = {
-#                 const.IFACE_DISCONNECTED: "Disconnected",
-#                 const.IFACE_SCANNING: "Scanning",
-#                 const.IFACE_INACTIVE: "Inactive",
-#                 const.IFACE_CONNECTING: "Connecting",
-#                 const.IFACE_CONNECTED: "Connected",
-#             }.get(status, "Unknown")
-#
-#
-#             mac_address = netifaces.ifaddresses(iface.name()).get(netifaces.AF_LINK, [{}])[0].get('addr', 'Unknown')
-#
-#             iface_info = NetworkInterface(
-#                 index=index,
-#                 name=iface.name(),
-#                 description=iface.name(),
-#                 mac_address=mac_address,
-#                 status=status_description
-#             )
-#             network_interfaces.append(iface_info)
-#         return network_interfaces
-#     except Exception as e:
-#         logger.error("Failed to fetch Wi-Fi interfaces", exc_info=True)
-#         raise e
 
 def scan_wifi_networks(interface_index: int = 0) -> List[Network]:
     wifi = PyWiFi()
@@ -157,3 +63,61 @@ def convert_security_type(akm_type):
         const.AKM_TYPE_WPA2: 'WPA2',
         const.AKM_TYPE_WPA2PSK: 'WPA2-PSK'
     }.get(akm_type, 'Unknown')
+
+
+def get_best_wifi_interface():
+    wifi = PyWiFi()
+    if not wifi.interfaces():
+        logger.error("No Wi-Fi interfaces found.")
+        raise HTTPException(status_code=404, detail="No Wi-Fi interfaces available.")
+    
+    # Example criteria: choose the first available interface that is not connected
+    for iface in wifi.interfaces():
+        if iface.status() == const.IFACE_DISCONNECTED:
+            logger.info(f"Selected interface {iface.name()} as the best available option.")
+            return iface
+    
+    logger.warning("No suitable Wi-Fi interface found, selecting default.")
+    return wifi.interfaces()[0]  # default to the first interface if none are disconnected
+
+
+def connect_to_network(interface_index: int, ssid: str, password: str = None):
+    wifi = PyWiFi()
+    if interface_index >= len(wifi.interfaces()):
+        logger.error("Interface index out of range")
+        raise HTTPException(status_code=404, detail="Interface index out of range.")
+
+    iface = wifi.interfaces()[interface_index]
+    iface.disconnect()
+    time.sleep(1)  # ensure the interface is disconnected
+
+    profile = Profile()
+    profile.ssid = ssid
+
+    # Setting default for open network
+    profile.auth = const.AUTH_ALG_OPEN
+    profile.akm.append(const.AKM_TYPE_NONE)
+    profile.cipher = const.CIPHER_TYPE_NONE
+
+    if password:
+        # Configure for WPA2PSK if password is provided
+        profile.akm = [const.AKM_TYPE_WPA2PSK]
+        profile.cipher = const.CIPHER_TYPE_CCMP
+        profile.key = password
+    elif password is None and not any(x == const.AKM_TYPE_NONE for x in profile.akm):
+        logger.error("Password required for secured network")
+        raise HTTPException(status_code=400, detail="Password required for secured network")
+
+    iface.remove_all_network_profiles()
+    tmp_profile = iface.add_network_profile(profile)
+
+    logger.debug("Attempting to connect to network")
+    iface.connect(tmp_profile)
+    time.sleep(10)  # wait for connection to establish
+
+    if iface.status() == const.IFACE_CONNECTED:
+        logger.info("Connected to the network successfully")
+        return {"connected": True, "status": "Connected to the network successfully"}
+    else:
+        logger.warning("Failed to connect to the network")
+        return {"connected": False, "status": "Failed to connect to the network"}

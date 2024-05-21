@@ -43,23 +43,33 @@ class SmsModem:
             raise
 
     def receive(self):
-        start_time = time.time()
-        while True:
-            if time.time() - start_time > OTP_TIMEOUT:
-                logger.warning("Timeout reached while waiting for SMS.")
-                return None
-            try:
-                line = self.ser.readline().decode('utf-8').strip()
-                if line:
-                    logger.debug(f"Received line from modem: {line}")
-                    return line
-            except serial.SerialException as e:
-                logger.error(f"Error during receiving data from modem: {e}")
-                raise
-            except Exception as e:
-                logger.error(f"Unhandled exception during receiving data from modem: {e}")
-                raise
-            time.sleep(1)
+        try:
+            line = self.ser.readline().decode().strip()
+            if line:
+                logger.debug(f"Received line from modem: {line}")
+            return line
+        except Exception as e:
+            logger.error(f"Error reading from modem: {e}")
+
+#    def receive(self):
+#        start_time = time.time()
+#        while True:
+#            logger.debug(f"Waiting for OTP {time.time()}")
+#            if time.time() - start_time > OTP_TIMEOUT:
+#                logger.warning("Timeout reached while waiting for SMS.")
+#                return None
+#            try:
+#                line = self.ser.readline().decode('utf-8').strip()
+#                if line:
+#                    logger.debug(f"Received line from modem: {line}")
+#                    return line
+#            except serial.SerialException as e:
+#                logger.error(f"Error during receiving data from modem: {e}")
+#                raise
+#            except Exception as e:
+#                logger.error(f"Unhandled exception during receiving data from modem: {e}")
+#                raise
+#            time.sleep(1)
 
 
 class Indication(Enum):
@@ -111,3 +121,38 @@ def extract_otp(sms_content):
         return otp
     logger.warning("No OTP found in the SMS content.")
     return None
+
+
+def receive_otp(sms_modem):
+    logger.info("Waiting to receive OTP.")
+    start_time = time.time()
+    while time.time() - start_time < OTP_TIMEOUT:
+        line = sms_modem.receive()
+        if line:
+            indication, info = message_type(line)
+            if indication == Indication.RX_SMS:
+                sms_content = process_sms(sms_modem, info)
+                logger.debug(f"Received SMS content: {sms_content}")
+                otp = extract_otp(sms_content)
+                if otp:
+                    return otp
+    logger.warning("OTP reception timed out.")
+    return None
+
+#def receive_otp(sms_modem):
+#    logger.info("Trying to recieve OTP")
+#    start_time = time.time()
+#    otp = None
+#    while otp is None:
+#        if time.time() - start_time > OTP_TIMEOUT:
+#            logger.warning("Timeout reached while waiting for SMS.")
+#            return None
+#        line = sms_modem.receive()
+#        logger.info(f'{line}')
+#        logger.debug(f'{time.time()}')
+#        indication, info = message_type(line)
+#        if indication == Indication.RX_SMS:
+#            sms_content = process_sms(sms_modem, info)
+#            logger.debug(f"Recieved SMS content: {sms_content}.")
+#            otp = extract_otp(sms_content)
+#    return otp
